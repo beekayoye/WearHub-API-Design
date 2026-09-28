@@ -1,0 +1,241 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrderStatus {
+  placed
+  confirmed
+  packed
+  shipped
+  delivered
+  completed
+  cancelled
+  return_requested
+  returned
+
+  @@map("order_status")
+}
+
+model Buyer {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullName        String    @map("full_name")
+  email           String    @unique(map: "uq_buyers_email")
+  phone           String    @unique(map: "uq_buyers_phone")
+  deliveryAddress String    @map("delivery_address")
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  orders  Order[]
+  reviews Review[]
+
+  @@map("buyers")
+}
+
+model Seller {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopName  String    @unique(map: "uq_sellers_shop_name") @map("shop_name")
+  ownerName String    @map("owner_name")
+  email     String    @unique(map: "uq_sellers_email")
+  phone     String
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products        Product[]
+  productVariants ProductVariant[]
+  orders          Order[]
+  orderItems      OrderItem[]
+
+  @@map("sellers")
+}
+
+model Category {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique(map: "uq_categories_name")
+  slug      String   @unique(map: "uq_categories_slug")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  productCategories ProductCategory[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sellerId      String    @map("seller_id") @db.Uuid
+  name          String
+  description   String
+  isActive      Boolean   @default(true) @map("is_active")
+  ratingAvgX100 Int       @default(0) @map("rating_avg_x100")
+  ratingCount   Int       @default(0) @map("rating_count")
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  seller            Seller            @relation(fields: [sellerId], references: [id], map: "fk_products_seller")
+  productCategories ProductCategory[]
+  productVariants   ProductVariant[]
+  orderItems        OrderItem[]
+  reviews           Review[]
+
+  @@unique([id, sellerId], map: "uq_products_id_seller")
+  @@map("products")
+}
+
+model ProductCategory {
+  productId  String   @map("product_id") @db.Uuid
+  categoryId String   @map("category_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade, map: "fk_product_categories_product")
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict, map: "fk_product_categories_category")
+
+  @@id([productId, categoryId], map: "pk_product_categories")
+  @@index([categoryId, productId], map: "idx_product_categories_category")
+  @@map("product_categories")
+}
+
+model ProductVariant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId     String    @map("product_id") @db.Uuid
+  sellerId      String    @map("seller_id") @db.Uuid
+  size          String
+  colour        String
+  sku           String    @unique(map: "uq_product_variants_sku")
+  priceMinor    BigInt    @map("price_minor")
+  currency      String    @default("NGN") @db.Char(3)
+  stockQuantity Int       @map("stock_quantity")
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product    Product     @relation(fields: [productId], references: [id], map: "fk_product_variants_product")
+  seller     Seller      @relation(fields: [sellerId], references: [id], map: "fk_product_variants_seller")
+  orderItems OrderItem[]
+
+  @@unique([productId, size, colour], map: "uq_product_variants_product_size_colour")
+  @@unique([id, sellerId], map: "uq_product_variants_id_seller")
+  @@unique([id, productId], map: "uq_product_variants_id_product")
+  @@unique([id, sellerId, productId, priceMinor, currency], map: "uq_product_variants_composite")
+  @@map("product_variants")
+}
+
+model Order {
+  id                      String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buyerId                 String      @map("buyer_id") @db.Uuid
+  sellerId                String      @map("seller_id") @db.Uuid
+  status                  OrderStatus @default(placed)
+  currency                String      @default("NGN") @db.Char(3)
+  subtotalMinor           BigInt      @default(0) @map("subtotal_minor")
+  deliveryFeeMinor        BigInt      @default(0) @map("delivery_fee_minor")
+  totalMinor              BigInt      @default(dbgenerated("(subtotal_minor + delivery_fee_minor)")) @map("total_minor")
+  deliveryAddressSnapshot String      @map("delivery_address_snapshot")
+  placedAt                DateTime    @default(now()) @map("placed_at") @db.Timestamptz(6)
+  confirmedAt             DateTime?   @map("confirmed_at") @db.Timestamptz(6)
+  packedAt                DateTime?   @map("packed_at") @db.Timestamptz(6)
+  shippedAt               DateTime?   @map("shipped_at") @db.Timestamptz(6)
+  deliveredAt             DateTime?   @map("delivered_at") @db.Timestamptz(6)
+  completedAt             DateTime?   @map("completed_at") @db.Timestamptz(6)
+  cancelledAt             DateTime?   @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy             String?     @map("cancelled_by")
+  createdAt               DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  buyer              Buyer                @relation(fields: [buyerId], references: [id], map: "fk_orders_buyer")
+  seller             Seller               @relation(fields: [sellerId], references: [id], map: "fk_orders_seller")
+  orderItems         OrderItem[]
+  orderStatusHistory OrderStatusHistory[]
+  reviews            Review[]
+
+  @@unique([id, sellerId], map: "uq_orders_id_seller")
+  @@unique([id, currency], map: "uq_orders_id_currency")
+  @@unique([id, buyerId, status], map: "uq_orders_id_buyer_status")
+  @@index([sellerId, placedAt], map: "idx_orders_seller_open")
+  @@index([buyerId, placedAt(sort: Desc), id(sort: Desc)], map: "idx_orders_buyer_placed")
+  @@index([deliveredAt], map: "idx_orders_delivered")
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId             String   @map("order_id") @db.Uuid
+  sellerId            String   @map("seller_id") @db.Uuid
+  variantId           String   @map("variant_id") @db.Uuid
+  productId           String   @map("product_id") @db.Uuid
+  productNameSnapshot String   @map("product_name_snapshot")
+  sizeSnapshot        String   @map("size_snapshot")
+  colourSnapshot      String   @map("colour_snapshot")
+  quantity            Int
+  unitPriceMinor      BigInt   @map("unit_price_minor")
+  currency            String   @default("NGN") @db.Char(3)
+  lineTotalMinor      BigInt   @default(dbgenerated("(unit_price_minor * quantity)")) @map("line_total_minor")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order   Order          @relation(fields: [orderId], references: [id], map: "fk_order_items_order")
+  seller  Seller         @relation(fields: [sellerId], references: [id], map: "fk_order_items_seller")
+  variant ProductVariant @relation(fields: [variantId], references: [id], map: "fk_order_items_variant")
+  product Product        @relation(fields: [productId], references: [id], map: "fk_order_items_product")
+  review  Review?
+
+  @@unique([orderId, variantId], map: "uq_order_items_order_variant")
+  @@unique([id, orderId], map: "uq_order_items_id_order")
+  @@unique([id, productId], map: "uq_order_items_id_product")
+  @@map("order_items")
+}
+
+model OrderStatusTransition {
+  fromStatus OrderStatus @map("from_status")
+  toStatus   OrderStatus @map("to_status")
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([fromStatus, toStatus], map: "pk_order_status_transitions")
+  @@map("order_status_transitions")
+}
+
+model OrderStatusHistory {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId       String       @map("order_id") @db.Uuid
+  fromStatus    OrderStatus? @map("from_status")
+  toStatus      OrderStatus  @map("to_status")
+  changedByRole String       @map("changed_by_role")
+  reason        String?
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], map: "fk_order_status_history_order")
+
+  @@index([orderId, createdAt], map: "idx_order_status_history_order")
+  @@map("order_status_history")
+}
+
+model Review {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderItemId String      @unique(map: "uq_reviews_order_item") @map("order_item_id") @db.Uuid
+  orderId     String      @map("order_id") @db.Uuid
+  productId   String      @map("product_id") @db.Uuid
+  buyerId     String      @map("buyer_id") @db.Uuid
+  orderStatus OrderStatus @map("order_status")
+  stars       Int         @db.SmallInt
+  comment     String?
+  deletedAt   DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], map: "fk_reviews_order_item")
+  order     Order     @relation(fields: [orderId], references: [id], map: "fk_reviews_order")
+  product   Product   @relation(fields: [productId], references: [id], map: "fk_reviews_product")
+  buyer     Buyer     @relation(fields: [buyerId], references: [id], map: "fk_reviews_buyer")
+
+  @@index([productId, createdAt(sort: Desc)], map: "idx_reviews_product_created")
+  @@map("reviews")
+}

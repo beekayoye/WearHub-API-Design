@@ -1,0 +1,15 @@
+services:
+  weardb:
+    image: postgres:16-alpine
+    container_name: weardb
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: wearhub
+    ports:
+      - "5433:5432"
+    volumes:
+      - weardb_data:/var/lib/postgresql/data
+
+volumes:
+  weardb_data:
